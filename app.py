@@ -6,10 +6,9 @@ from datetime import datetime, timezone, timedelta
 # ページの設定
 st.set_page_config(page_title="お迎えルート", layout="centered")
 
-# === 画面上部が隠れないよう、上部パディングを広げたCSS ===
+# === 画面デザイン用CSS ===
 st.markdown("""
 <style>
-    /* 上部に十分な余白をとることでメニューバーへの隠れを防止 */
     .block-container { padding-top: 3.5rem !important; padding-bottom: 1rem !important; }
     
     .title-text { font-size: 20px; font-weight: bold; text-align: center; margin-bottom: 0px; }
@@ -54,14 +53,14 @@ def get_route_info(waypoints):
         "intermediates": intermediates, "travelMode": "DRIVE", "routingPreference": "TRAFFIC_AWARE"
     }
     
-    res = requests.post(url, headers=headers, json=payload).json()
     try:
+        res = requests.post(url, headers=headers, json=payload).json()
         dur_str = res["routes"][0]["duration"]
         stat_str = res["routes"][0].get("staticDuration", dur_str)
         time_m = int(dur_str.replace("s", "")) // 60
         stat_m = int(stat_str.replace("s", "")) // 60
         return time_m, max(0, time_m - stat_m)
-    except:
+    except Exception as e:
         return None, None
 
 def get_gmaps_url(waypoints):
@@ -97,7 +96,7 @@ if st.button("🔄 現在の状況をチェック", type="primary", use_containe
             if time_a < time_b:
                 st.markdown(f"<div class='win-badge'>✨ ルートA（直線）が {time_b - time_a}分 早い！</div>", unsafe_allow_html=True)
             elif time_b < time_a:
-                st.markdown(f"<div class='win-badge'>✨ ルートB（南陽台）が {time_a - time_b}分 早い！</div>", unsafe_allow_html=Type)
+                st.markdown(f"<div class='win-badge'>✨ ルートB（南陽台）が {time_a - time_b}分 早い！</div>", unsafe_allow_html=True)
             else:
                 st.markdown("<div class='tie-badge'>どちらも到着時間は同じです</div>", unsafe_allow_html=True)
             
@@ -106,3 +105,5 @@ if st.button("🔄 現在の状況をチェック", type="primary", use_containe
                 draw_card("ルートA (直線)", time_a, delay_a, get_gmaps_url(ROUTE_A))
             with col2:
                 draw_card("ルートB (南陽台)", time_b, delay_b, get_gmaps_url(ROUTE_B))
+        else:
+            st.error("ルート情報の取得に失敗しました。APIキーや通信状況をご確認ください。")
