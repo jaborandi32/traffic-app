@@ -1,96 +1,114 @@
 import streamlit as st
 import requests
+import urllib.parse
+from datetime import datetime, timezone, timedelta
 
-# ページの設定
-st.set_page_config(page_title="お迎えルート比較", page_icon="🚗", layout="centered")
+# ページの設定（スマホ向けに余白を極限まで削る）
+st.set_page_config(page_title="お迎えルート", layout="centered")
+
+# === 超コンパクト化＆デザイン用のCSS ===
+st.markdown("""
+<style>
+    /* 画面上下の無駄な余白を消去して1画面に収める */
+    .block-container { padding-top: 1.5rem !important; padding-bottom: 0.5rem !important; }
+    
+    .title-text { font-size: 20px; font-weight: bold; text-align: center; margin-bottom: 0px; }
+    .sub-text { font-size: 12px; color: gray; text-align: center; margin-bottom: 12px; }
+    
+    /* 勝敗結果のバッジ */
+    .win-badge { background-color: #e6f4ea; color: #1e8e3e; padding: 8px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 12px; font-size: 14px;}
+    .tie-badge { background-color: #e8f0fe; color: #1967d2; padding: 8px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 12px; font-size: 14px;}
+    
+    /* ルート情報カード */
+    .route-card { background: #fff; border-radius: 8px; padding: 12px; text-align: center; border: 2px solid #f0f2f6; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+    .r-name { font-size: 13px; font-weight: bold; color: #555; }
+    .r-time { font-size: 36px; font-weight: bold; color: #000; margin: -2px 0; }
+    .r-sub { font-size: 12px; margin-bottom: 12px; color: #666; }
+    .d-red { color: #d32f2f; font-weight: bold; }
+    .d-green { color: #2e7d32; }
+    
+    /* ナビ起動ボタン */
+    .nav-btn { display: block; background-color: #1a73e8; color: white !important; padding: 8px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: bold; }
+</style>
+""", unsafe_allow_html=True)
 
 # === 設定項目 ===
-# 取得したGoogle Routes APIキー
 API_KEY = "AIzaSyAfEHdBoGgIIiQ8AsSEvOwU-05I8A7qEEA"
-
-# 出発地と目的地（正確に認識させるため市町村名を付与しています）
 ORIGIN = "東京薬科大学, 八王子市"
 DESTINATION = "ひよこハウス豊田, 日野市"
+JST = timezone(timedelta(hours=+9), 'JST') # 日本時間
 
-# ルートA（直線ルート）の経由地
-ROUTE_A_WAYPOINTS = [
-    (35.638140, 139.388616),
-    (35.655021, 139.378821)
-]
+ROUTE_A = [(35.638140, 139.388616), (35.655021, 139.378821)]
+ROUTE_B = [(35.633740, 139.374954), (35.642243, 139.376011), (35.650988, 139.375014)]
 
-# ルートB（南陽台ルート）の経由地
-ROUTE_B_WAYPOINTS = [
-    (35.633740, 139.374954),
-    (35.642243, 139.376011),
-    (35.650988, 139.375014)
-]
-
-def get_route_time(waypoints):
-    """Google Routes APIにリクエストを送り、渋滞を加味した所要時間(分)を取得する"""
+def get_route_info(waypoints):
+    """渋滞を加味した時間と、遅延時間(分)を取得"""
     url = "https://routes.googleapis.com/directions/v2:computeRoutes"
-    
-    # APIに要求するデータ（ここでは「所要時間」だけを要求して通信を軽くします）
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": API_KEY,
-        "X-Goog-FieldMask": "routes.duration"
+        # 今回は「通常の時間(staticDuration)」も一緒に取得して比較します
+        "X-Goog-FieldMask": "routes.duration,routes.staticDuration"
     }
-    
-    # 経由地のデータをAPIの形式に変換（via=True にすることで「通過点」として扱い、停車時間をなくします）
-    intermediates = [
-        {
-            "location": {"latLng": {"latitude": lat, "longitude": lng}},
-            "via": True
-        }
-        for lat, lng in waypoints
-    ]
-    
-    # リクエストの中身
+    intermediates = [{"location": {"latLng": {"latitude": lat, "longitude": lng}}, "via": True} for lat, lng in waypoints]
     payload = {
-        "origin": {"address": ORIGIN},
-        "destination": {"address": DESTINATION},
-        "intermediates": intermediates,
-        "travelMode": "DRIVE",               # 自動車
-        "routingPreference": "TRAFFIC_AWARE" # 現在のリアルタイム渋滞を加味する
+        "origin": {"address": ORIGIN}, "destination": {"address": DESTINATION},
+        "intermediates": intermediates, "travelMode": "DRIVE", "routingPreference": "TRAFFIC_AWARE"
     }
     
-    response = requests.post(url, headers=headers, json=payload)
-    data = response.json()
-    
+    res = requests.post(url, headers=headers, json=payload).json()
     try:
-        # APIからは "900s" のように秒数で返ってくるので、数値にして60で割り「分」にする
-        duration_str = data["routes"][0]["duration"]
-        minutes = int(duration_str.replace("s", "")) // 60
-        return minutes
-    except (KeyError, IndexError):
-        # 万が一エラーが起きた場合
-        st.error("ルート情報の取得に失敗しました。経由地やAPIキーの設定を確認してください。")
-        return None
+        dur_str = res["routes"][0]["duration"]
+        stat_str = res["routes"][0].get("staticDuration", dur_str)
+        time_m = int(dur_str.replace("s", "")) // 60
+        stat_m = int(stat_str.replace("s", "")) // 60
+        return time_m, max(0, time_m - stat_m)
+    except:
+        return None, None
 
-# === アプリの画面設計 ===
-st.title("🚗 お迎えルート比較")
-st.write("東京薬科大学 ➔ ひよこハウス豊田")
+def get_gmaps_url(waypoints):
+    """Googleマップアプリを一発起動するためのURLを作成"""
+    org = urllib.parse.quote(ORIGIN)
+    dst = urllib.parse.quote(DESTINATION)
+    wps = "|".join([f"{lat},{lng}" for lat, lng in waypoints])
+    return f"https://www.google.com/maps/dir/?api=1&origin={org}&destination={dst}&waypoints={wps}&travelmode=driving"
 
-# ボタンを押した時の処理
-if st.button("🔄 現在の所要時間をチェック", type="primary", use_container_width=True):
+def draw_card(name, time, delay, url):
+    """カードUIを描画"""
+    eta = (datetime.now(JST) + timedelta(minutes=time)).strftime("%H:%M")
+    delay_html = f"<span class='d-red'>+{delay}分渋滞</span>" if delay > 0 else "<span class='d-green'>渋滞なし</span>"
+    
+    html = f"""
+    <div class="route-card">
+        <div class="r-name">{name}</div>
+        <div class="r-time">{time}<span style="font-size:16px; font-weight:normal;">分</span></div>
+        <div class="r-sub">{eta} 着 ({delay_html})</div>
+        <a href="{url}" class="nav-btn" target="_blank">📱 ナビ開始</a>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
+
+# === 画面レイアウト ===
+st.markdown("<div class='title-text'>🚗 お迎えルート比較</div>", unsafe_allow_html=True)
+st.markdown("<div class='sub-text'>東京薬科大学 ➔ ひよこハウス豊田</div>", unsafe_allow_html=True)
+
+if st.button("🔄 現在の状況をチェック", type="primary", use_container_width=True):
     with st.spinner("渋滞情報を取得中..."):
-        time_a = get_route_time(ROUTE_A_WAYPOINTS)
-        time_b = get_route_time(ROUTE_B_WAYPOINTS)
+        time_a, delay_a = get_route_info(ROUTE_A)
+        time_b, delay_b = get_route_info(ROUTE_B)
         
         if time_a is not None and time_b is not None:
-            st.divider()
-            
-            # 結果を比較して表示
+            # 勝敗バッジの表示
             if time_a < time_b:
-                st.success(f"✨ 今は **ルートA（直線ルート）** が {time_b - time_a}分 早いです！")
+                st.markdown(f"<div class='win-badge'>✨ ルートA（直線）が {time_b - time_a}分 早い！</div>", unsafe_allow_html=True)
             elif time_b < time_a:
-                st.success(f"✨ 今は **ルートB（南陽台ルート）** が {time_a - time_b}分 早いです！")
+                st.markdown(f"<div class='win-badge'>✨ ルートB（南陽台）が {time_a - time_b}分 早い！</div>", unsafe_allow_html=True)
             else:
-                st.info("どちらのルートも到着時間は同じです。")
+                st.markdown("<div class='tie-badge'>どちらも到着時間は同じです</div>", unsafe_allow_html=True)
             
-            # 並べて大きく表示
+            # 左右にカードを並べる
             col1, col2 = st.columns(2)
             with col1:
-                st.metric("ルートA (直線)", f"{time_a} 分")
+                draw_card("ルートA (直線)", time_a, delay_a, get_gmaps_url(ROUTE_A))
             with col2:
-                st.metric("ルートB (南陽台)", f"{time_b} 分")
+                draw_card("ルートB (南陽台)", time_b, delay_b, get_gmaps_url(ROUTE_B))
