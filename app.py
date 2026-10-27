@@ -3,14 +3,14 @@ import requests
 import urllib.parse
 from datetime import datetime, timezone, timedelta
 
-# ページの設定（スマホ向けに余白を極限まで削る）
+# ページの設定
 st.set_page_config(page_title="お迎えルート", layout="centered")
 
-# === 超コンパクト化＆デザイン用のCSS ===
+# === 画面上部が隠れないよう、上部パディングを広げたCSS ===
 st.markdown("""
 <style>
-    /* 画面上下の無駄な余白を消去して1画面に収める */
-    .block-container { padding-top: 1.5rem !important; padding-bottom: 0.5rem !important; }
+    /* 上部に十分な余白をとることでメニューバーへの隠れを防止 */
+    .block-container { padding-top: 3.5rem !important; padding-bottom: 1rem !important; }
     
     .title-text { font-size: 20px; font-weight: bold; text-align: center; margin-bottom: 0px; }
     .sub-text { font-size: 12px; color: gray; text-align: center; margin-bottom: 12px; }
@@ -36,18 +36,16 @@ st.markdown("""
 API_KEY = "AIzaSyAfEHdBoGgIIiQ8AsSEvOwU-05I8A7qEEA"
 ORIGIN = "東京薬科大学, 八王子市"
 DESTINATION = "ひよこハウス豊田, 日野市"
-JST = timezone(timedelta(hours=+9), 'JST') # 日本時間
+JST = timezone(timedelta(hours=+9), 'JST')
 
 ROUTE_A = [(35.638140, 139.388616), (35.655021, 139.378821)]
 ROUTE_B = [(35.633740, 139.374954), (35.642243, 139.376011), (35.650988, 139.375014)]
 
 def get_route_info(waypoints):
-    """渋滞を加味した時間と、遅延時間(分)を取得"""
     url = "https://routes.googleapis.com/directions/v2:computeRoutes"
     headers = {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": API_KEY,
-        # 今回は「通常の時間(staticDuration)」も一緒に取得して比較します
         "X-Goog-FieldMask": "routes.duration,routes.staticDuration"
     }
     intermediates = [{"location": {"latLng": {"latitude": lat, "longitude": lng}}, "via": True} for lat, lng in waypoints]
@@ -67,14 +65,12 @@ def get_route_info(waypoints):
         return None, None
 
 def get_gmaps_url(waypoints):
-    """Googleマップアプリを一発起動するためのURLを作成"""
     org = urllib.parse.quote(ORIGIN)
     dst = urllib.parse.quote(DESTINATION)
     wps = "|".join([f"{lat},{lng}" for lat, lng in waypoints])
     return f"https://www.google.com/maps/dir/?api=1&origin={org}&destination={dst}&waypoints={wps}&travelmode=driving"
 
 def draw_card(name, time, delay, url):
-    """カードUIを描画"""
     eta = (datetime.now(JST) + timedelta(minutes=time)).strftime("%H:%M")
     delay_html = f"<span class='d-red'>+{delay}分渋滞</span>" if delay > 0 else "<span class='d-green'>渋滞なし</span>"
     
@@ -98,15 +94,13 @@ if st.button("🔄 現在の状況をチェック", type="primary", use_containe
         time_b, delay_b = get_route_info(ROUTE_B)
         
         if time_a is not None and time_b is not None:
-            # 勝敗バッジの表示
             if time_a < time_b:
                 st.markdown(f"<div class='win-badge'>✨ ルートA（直線）が {time_b - time_a}分 早い！</div>", unsafe_allow_html=True)
             elif time_b < time_a:
-                st.markdown(f"<div class='win-badge'>✨ ルートB（南陽台）が {time_a - time_b}分 早い！</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='win-badge'>✨ ルートB（南陽台）が {time_a - time_b}分 早い！</div>", unsafe_allow_html=Type)
             else:
                 st.markdown("<div class='tie-badge'>どちらも到着時間は同じです</div>", unsafe_allow_html=True)
             
-            # 左右にカードを並べる
             col1, col2 = st.columns(2)
             with col1:
                 draw_card("ルートA (直線)", time_a, delay_a, get_gmaps_url(ROUTE_A))
