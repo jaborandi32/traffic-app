@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <!-- スマホアプリのように表示するための設定 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>お迎えルート</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f0f2f6; padding: 20px 10px; margin: 0; color: #31333F; }
+        .title-text { font-size: 20px; font-weight: bold; text-align: center; margin-bottom: 4px; }
+        .sub-text { font-size: 12px; color: gray; text-align: center; margin-bottom: 20px; }
+        
+        .check-btn { display: block; width: 100%; background-color: #ff4b4b; color: white; padding: 12px; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; cursor: pointer; margin-bottom: 20px; }
+        .check-btn:active { background-color: #ff3333; }
+        .check-btn:disabled { background-color: #ffb3b3; cursor: not-allowed; }
+        
+        .win-badge { background-color: #e6f4ea; color: #1e8e3e; padding: 8px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 12px; font-size: 14px; }
+        .tie-badge { background-color: #e8f0fe; color: #1967d2; padding: 8px; border-radius: 6px; text-align: center; font-weight: bold; margin-bottom: 12px; font-size: 14px; }
+        
+        .cards-container { display: flex; gap: 10px; }
+        .route-card { flex: 1; background: #fff; border-radius: 8px; padding: 12px; text-align: center; border: 2px solid #f0f2f6; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .r-name { font-size: 13px; font-weight: bold; color: #555; }
+        .r-time { font-size: 36px; font-weight: bold; color: #000; margin: -2px 0; }
+        .r-sub { font-size: 12px; margin-bottom: 12px; color: #666; }
+        .d-red { color: #d32f2f; font-weight: bold; }
+        .d-green { color: #2e7d32; }
+        .nav-btn { display: block; background-color: #1a73e8; color: white; padding: 8px; border-radius: 6px; text-decoration: none; font-size: 13px; font-weight: bold; }
+        
+        #loading { text-align: center; color: #666; font-size: 14px; display: none; margin-bottom: 20px; }
+        #result-area { display: none; }
+    </style>
+</head>
+<body>
+
+    <div class="title-text">🚗 お迎えルート比較</div>
+    <div class="sub-text">東京薬科大学 ➔ ひよこハウス豊田</div>
+
+    <button id="checkBtn" class="check-btn" onclick="checkRoutes()">🔄 現在の状況をチェック</button>
+    <div id="loading">⏳ 渋滞情報を取得中...</div>
+
+    <div id="result-area">
+        <div id="badge-area"></div>
+        <div class="cards-container">
+            <div id="card-a" class="route-card"></div>
+            <div id="card-b" class="route-card"></div>
+        </div>
+    </div>
+
+    <script>
+        const API_KEY = "AIzaSyAfEHdBoGgIIiQ8AsSEvOwU-05I8A7qEEA";
+        const ORIGIN = "東京薬科大学, 八王子市";
+        const DESTINATION = "ひよこハウス豊田, 日野市";
+        
+        const ROUTE_A = [[35.638140, 139.388616], [35.655021, 139.378821]];
+        const ROUTE_B = [[35.633740, 139.374954], [35.642243, 139.376011], [35.650988, 139.375014]];
+
+        async function fetchRouteInfo(waypoints) {
+            const url = "https://routes.googleapis.com/directions/v2:computeRoutes";
+            const intermediates = waypoints.map(wp => ({ location: { latLng: { latitude: wp[0], longitude: wp[1] } }, via: true }));
+            
+            const payload = {
+                origin: { address: ORIGIN },
+                destination: { address: DESTINATION },
+                intermediates: intermediates,
+                travelMode: "DRIVE",
+                routingPreference: "TRAFFIC_AWARE"
+            };
+
+            const response = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-Goog-Api-Key": API_KEY,
+                    "X-Goog-FieldMask": "routes.duration,routes.staticDuration"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await response.json();
+            const durStr = data.routes[0].duration;
+            const statStr = data.routes[0].staticDuration || durStr;
+            
+            const timeM = Math.floor(parseInt(durStr.replace("s", "")) / 60);
+            const statM = Math.floor(parseInt(statStr.replace("s", "")) / 60);
+            return { time: timeM, delay: Math.max(0, timeM - statM) };
+        }
+
+        function getMapsUrl(waypoints) {
+            const org = encodeURIComponent(ORIGIN);
+            const dst = encodeURIComponent(DESTINATION);
+            const wps = waypoints.map(wp => `${wp[0]},${wp[1]}`).join("|");
+            return `https://www.google.com/maps/dir/?api=1&origin=${org}&destination=${dst}&waypoints=${wps}&travelmode=driving`;
+        }
+
+        function renderCard(elementId, name, routeData, waypoints) {
+            const eta = new Date(Date.now() + routeData.time * 60000);
+            const etaStr = eta.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+            const delayHtml = routeData.delay > 0 ? `<span class="d-red">+${routeData.delay}分渋滞</span>` : `<span class="d-green">渋滞なし</span>`;
+            
+            document.getElementById(elementId).innerHTML = `
+                <div class="r-name">${name}</div>
+                <div class="r-time">${routeData.time}<span style="font-size:16px; font-weight:normal;">分</span></div>
+                <div class="r-sub">${etaStr} 着<br>(${delayHtml})</div>
+                <a href="${getMapsUrl(waypoints)}" class="nav-btn" target="_blank">📱 ナビ開始</a>
+            `;
+        }
+
+        async function checkRoutes() {
+            const btn = document.getElementById("checkBtn");
+            const loading = document.getElementById("loading");
+            const resultArea = document.getElementById("result-area");
+            const badgeArea = document.getElementById("badge-area");
+
+            btn.disabled = true;
+            loading.style.display = "block";
+            resultArea.style.display = "none";
+
+            try {
+                const [resA, resB] = await Promise.all([fetchRouteInfo(ROUTE_A), fetchRouteInfo(ROUTE_B)]);
+                
+                if (resA.time < resB.time) {
+                    badgeArea.innerHTML = `<div class="win-badge">✨ ルートA（直線）が ${resB.time - resA.time}分 早い！</div>`;
+                } else if (resB.time < resA.time) {
+                    badgeArea.innerHTML = `<div class="win-badge">✨ ルートB（南陽台）が ${resA.time - resB.time}分 早い！</div>`;
+                } else {
+                    badgeArea.innerHTML = `<div class="tie-badge">どちらも到着時間は同じです</div>`;
+                }
+
+                renderCard("card-a", "ルートA (直線)", resA, ROUTE_A);
+                renderCard("card-b", "ルートB (南陽台)", resB, ROUTE_B);
+                
+                resultArea.style.display = "block";
+            } catch (error) {
+                alert("ルート情報の取得に失敗しました。");
+                console.error(error);
+            } finally {
+                btn.disabled = false;
+                loading.style.display = "none";
+            }
+        }
+    </script>
+</body>
+</html>
